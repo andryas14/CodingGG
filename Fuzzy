@@ -1,0 +1,361 @@
+#include "thingProperties.h"
+#include "Fuzzy.h"
+#include <Wire.h>
+#include <Adafruit_INA219.h>
+
+const int ENA = 3;
+const int IN1 = 4;
+const int IN2 = 5;
+#include "DHT.h"
+#define DHTTYPE DHT22
+#define DHTPIN1 2
+#define DHTPIN2 7
+#define relaypin 6
+Adafruit_INA219 ina219;
+
+unsigned long startTime = 0;
+unsigned long elapsedTime = 0;
+unsigned long operationDuration = 0;
+
+DHT dht1 (DHTPIN1, DHTTYPE);
+DHT dht2 (DHTPIN2, DHTTYPE);
+
+// Fuzzy
+Fuzzy *fuzzy = new Fuzzy();
+
+// FuzzyInput1
+FuzzySet *ColdTemp = new FuzzySet(15, 15, 21, 23);
+FuzzySet *NormalTemp = new FuzzySet(21, 24.5, 24.5, 28);
+FuzzySet *HotTemp = new FuzzySet(26, 28, 35, 35);
+
+// FuzzyInput
+FuzzySet *DryHumid = new FuzzySet(0, 0, 85, 87);
+FuzzySet *NormalHumid = new FuzzySet(85, 90, 90, 95);
+FuzzySet *WetHumid = new FuzzySet(93, 95, 100, 100);
+
+// FuzzyOutput
+FuzzySet *ShortHumidifier = new FuzzySet(0, 0, 0, 3);
+FuzzySet *MedHumidifier = new FuzzySet(1.25, 3, 3, 4.5);
+FuzzySet *LongHumidifier = new FuzzySet(3.5, 9, 9, 9);
+
+// FuzzyOutput
+FuzzySet *SlowFan = new FuzzySet(34.85, 34.85, 34.85, 46.19);
+FuzzySet *NormalFan = new FuzzySet(40.62, 63.38, 63.38, 93.59);
+FuzzySet *FastFan = new FuzzySet(74.81, 103.1, 120, 120);
+
+void setup() {
+  // Initialize serial and wait for port to open:
+  Serial.begin(9600);
+  
+  if (! ina219.begin()) {
+    Serial.println("Failed to find INA219 chip");
+    while (1) { delay(10); }
+  }
+
+
+  dht1.begin();
+  dht2.begin();
+  
+  // FuzzyInput
+  FuzzyInput *Temp = new FuzzyInput(1);
+
+  Temp->addFuzzySet(ColdTemp);
+  Temp->addFuzzySet(NormalTemp);
+  Temp->addFuzzySet(HotTemp);
+  fuzzy->addFuzzyInput(Temp);
+
+  // FuzzyInput
+  FuzzyInput *Humid = new FuzzyInput(2);
+
+  Humid->addFuzzySet(DryHumid);
+  Humid->addFuzzySet(NormalHumid);
+  Humid->addFuzzySet(WetHumid);
+  fuzzy->addFuzzyInput(Humid);
+
+  // FuzzyOutput
+  FuzzyOutput *Humidifier = new FuzzyOutput(1);
+
+  Humidifier->addFuzzySet(ShortHumidifier);
+  Humidifier->addFuzzySet(MedHumidifier);
+  Humidifier->addFuzzySet(LongHumidifier);
+  fuzzy->addFuzzyOutput(Humidifier);
+
+  // FuzzyOutput
+  FuzzyOutput *Fan = new FuzzyOutput(2);
+
+  Fan->addFuzzySet(SlowFan);
+  Fan->addFuzzySet(NormalFan);
+  Fan->addFuzzySet(FastFan);
+  fuzzy->addFuzzyOutput(Fan);
+
+  // Building FuzzyRule1
+  FuzzyRuleAntecedent *RuleInput1 = new FuzzyRuleAntecedent();
+  RuleInput1->joinWithAND(ColdTemp, DryHumid);
+
+  FuzzyRuleConsequent *RuleOutput1 = new FuzzyRuleConsequent();
+  RuleOutput1->addOutput(LongHumidifier);
+  RuleOutput1->addOutput(SlowFan);
+
+  FuzzyRule *fuzzyRule1 = new FuzzyRule(1, RuleInput1, RuleOutput1);
+  fuzzy->addFuzzyRule(fuzzyRule1);
+  
+  // Building FuzzyRule2
+  FuzzyRuleAntecedent *RuleInput2 = new FuzzyRuleAntecedent();
+  RuleInput2->joinWithAND(ColdTemp, NormalHumid);
+
+  FuzzyRuleConsequent *RuleOutput2 = new FuzzyRuleConsequent();
+  RuleOutput2->addOutput(MedHumidifier);
+  RuleOutput2->addOutput(SlowFan);
+
+  FuzzyRule *fuzzyRule2 = new FuzzyRule(2, RuleInput2, RuleOutput2);
+  fuzzy->addFuzzyRule(fuzzyRule2);
+  
+  // Building FuzzyRule3
+  FuzzyRuleAntecedent *RuleInput3 = new FuzzyRuleAntecedent();
+  RuleInput3->joinWithAND(ColdTemp, WetHumid);
+
+  FuzzyRuleConsequent *RuleOutput3 = new FuzzyRuleConsequent();
+  RuleOutput3->addOutput(ShortHumidifier);
+  RuleOutput3->addOutput(FastFan);
+
+  FuzzyRule *fuzzyRule3 = new FuzzyRule(3, RuleInput3, RuleOutput3);
+  fuzzy->addFuzzyRule(fuzzyRule3);
+  
+  // Building FuzzyRule4
+  FuzzyRuleAntecedent *RuleInput4 = new FuzzyRuleAntecedent();
+  RuleInput4->joinWithAND(NormalTemp, DryHumid);
+
+  FuzzyRuleConsequent *RuleOutput4 = new FuzzyRuleConsequent();
+  RuleOutput4->addOutput(LongHumidifier);
+  RuleOutput4->addOutput(SlowFan);
+
+  FuzzyRule *fuzzyRule4 = new FuzzyRule(4, RuleInput4, RuleOutput4);
+  fuzzy->addFuzzyRule(fuzzyRule4);
+  
+  // Building FuzzyRule5
+  FuzzyRuleAntecedent *RuleInput5 = new FuzzyRuleAntecedent();
+  RuleInput5->joinWithAND(NormalTemp, NormalHumid);
+
+  FuzzyRuleConsequent *RuleOutput5 = new FuzzyRuleConsequent();
+  RuleOutput5->addOutput(MedHumidifier);
+  RuleOutput5->addOutput(SlowFan);
+
+  FuzzyRule *fuzzyRule5 = new FuzzyRule(5, RuleInput5, RuleOutput5);
+  fuzzy->addFuzzyRule(fuzzyRule5);
+  
+  // Building FuzzyRule6
+  FuzzyRuleAntecedent *RuleInput6 = new FuzzyRuleAntecedent();
+  RuleInput6->joinWithAND(NormalTemp, WetHumid);
+
+  FuzzyRuleConsequent *RuleOutput6 = new FuzzyRuleConsequent();
+  RuleOutput6->addOutput(ShortHumidifier);
+  RuleOutput6->addOutput(FastFan);
+
+  FuzzyRule *fuzzyRule6 = new FuzzyRule(6, RuleInput6, RuleOutput6);
+  fuzzy->addFuzzyRule(fuzzyRule6);
+  
+  // Building FuzzyRule7
+  FuzzyRuleAntecedent *RuleInput7 = new FuzzyRuleAntecedent();
+  RuleInput7->joinWithAND(HotTemp, DryHumid);
+
+  FuzzyRuleConsequent *RuleOutput7 = new FuzzyRuleConsequent();
+  RuleOutput7->addOutput(LongHumidifier);
+  RuleOutput7->addOutput(SlowFan);
+
+  FuzzyRule *fuzzyRule7 = new FuzzyRule(7, RuleInput7, RuleOutput7);
+  fuzzy->addFuzzyRule(fuzzyRule7);
+  
+  // Building FuzzyRule8
+  FuzzyRuleAntecedent *RuleInput8 = new FuzzyRuleAntecedent();
+  RuleInput8->joinWithAND(HotTemp, NormalHumid);
+
+  FuzzyRuleConsequent *RuleOutput8 = new FuzzyRuleConsequent();
+  RuleOutput8->addOutput(LongHumidifier);
+  RuleOutput8->addOutput(NormalFan);
+
+  FuzzyRule *fuzzyRule8 = new FuzzyRule(8, RuleInput8, RuleOutput8);
+  fuzzy->addFuzzyRule(fuzzyRule8);
+  
+  // Building FuzzyRule9
+  FuzzyRuleAntecedent *RuleInput9 = new FuzzyRuleAntecedent();
+  RuleInput9->joinWithAND(HotTemp, WetHumid);
+
+  FuzzyRuleConsequent *RuleOutput9 = new FuzzyRuleConsequent();
+  RuleOutput9->addOutput(ShortHumidifier);
+  RuleOutput9->addOutput(FastFan);
+
+  FuzzyRule *fuzzyRule9 = new FuzzyRule(9, RuleInput9, RuleOutput9);
+  fuzzy->addFuzzyRule(fuzzyRule9);
+
+  pinMode(ENA, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(relaypin, OUTPUT);
+  
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, 0);
+  
+  // This delay gives the chance to wait for a Serial Monitor without blocking if none is found
+  delay(1500); 
+
+  // Defined in thingProperties.h
+  initProperties();
+
+  // Connect to Arduino IoT Cloud
+  ArduinoCloud.begin(ArduinoIoTPreferredConnection);
+  
+  /*
+     The following function allows you to obtain more information
+     related to the state of network and IoT Cloud connection and errors
+     the higher number the more granular information you’ll get.
+     The default is 0 (only errors).
+     Maximum is 4
+ */
+  setDebugMessageLevel(2);
+  ArduinoCloud.printDebugInfo();
+}
+
+void loop() {
+  ArduinoCloud.update();
+  // Your code here
+  humidity = dht1.readHumidity();
+  temperature = dht1.readTemperature();
+  
+  humidity2 = dht2.readHumidity();
+  temperature2 = dht2.readTemperature();
+
+  powerHumidifier = ina219.getPower_mW();
+  
+  onSystemStatusChange();
+  
+}  
+
+
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+  Since HumidifierValue is READ_WRITE variable, onHumidifierValueChange() is
+  executed every time a new value is received from IoT Cloud.
+*/
+void onHumidifierValueChange()  {
+  // Add your code here to act upon HumidifierValue change
+}
+
+/*
+  Since FanValue is READ_WRITE variable, onFanValueChange() is
+  executed every time a new value is received from IoT Cloud.
+*/
+void onFanValueChange()  {
+  // Add your code here to act upon FanValue change
+}
+
+
+
+
+
+
+
+
+
+/*
+  Since Humidity2 is READ_WRITE variable, onHumidity2Change() is
+  executed every time a new value is received from IoT Cloud.
+*/
+void onHumidity2Change()  {
+  // Add your code here to act upon Humidity2 change
+}
+
+
+
+
+
+/*
+  Since SystemStatus is READ_WRITE variable, onSystemStatusChange() is
+  executed every time a new value is received from IoT Cloud.
+*/
+void onSystemStatusChange()  {
+  // Add your code here to act upon SystemStatus change
+  
+  if  (systemStatus == 0){
+    digitalWrite(relaypin, HIGH);
+    humidifierStatus = false;
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, HIGH);
+    analogWrite(ENA, 0);
+    fanStatus = false;
+  }
+  
+  else {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, HIGH);
+    analogWrite(ENA, round(fanValue));
+  
+    if (fanValue == 0) {
+    fanStatus = false;
+    }
+  
+    else {
+    fanStatus = true;
+    }
+  
+    // Check if the humidifier needs to be turned on
+    if (elapsedTime < operationDuration) {
+    digitalWrite(relaypin, LOW); // Turn on the humidifier
+    humidifierStatus = true; // Set the flag variable to true
+    } else {
+    digitalWrite(relaypin, HIGH); // Turn off the humidifier
+    humidifierStatus = false; // Set the flag variable to false
+    }
+  
+    if (elapsedTime >= operationDuration) {
+    startTime = millis(); // Reset the start time
+    elapsedTime = 0; // Reset the elapsed time
+    
+    delay(2000); // Wait for 2 seconds for the sensor readings to be updated
+  
+    fuzzy->setInput(1, temperature);
+    fuzzy->setInput(2, humidity);
+  
+    fuzzy->fuzzify();
+  
+    humidifierValue = fuzzy->defuzzify(1);
+    fanValue = fuzzy->defuzzify(2);
+    
+    operationDuration = (unsigned long) ((humidifierValue+3.19)*1000);
+    
+    } else {
+    elapsedTime = millis() - startTime; // Calculate the elapsed time
+    }
+    
+    
+  }                    
+
+    
+  
+}
