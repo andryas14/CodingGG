@@ -1,0 +1,185 @@
+#include "thingProperties.h"
+#include "Fuzzy.h"
+#include <Wire.h>
+#include <Adafruit_INA219.h>
+const int ENA = 3;
+const int IN1 = 4;
+const int IN2 = 5;
+#include "DHT.h"
+#define DHTTYPE DHT22
+#define DHTPIN1 2
+#define DHTPIN2 7
+#define relaypin 6
+
+Adafruit_INA219 ina219;
+
+DHT dht1 (DHTPIN1, DHTTYPE);
+DHT dht2 (DHTPIN2, DHTTYPE);
+
+void setup() {
+  // Initialize serial and wait for port to open:
+  Serial.begin(9600);
+
+  if (! ina219.begin()) {
+    Serial.println("Failed to find INA219 chip");
+    while (1) { delay(10); }
+  }
+
+
+  dht1.begin();
+  dht2.begin();
+
+  pinMode(ENA, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(relaypin, OUTPUT);
+  
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, 0);
+  
+  // This delay gives the chance to wait for a Serial Monitor without blocking if none is found
+  delay(1500); 
+
+  // Defined in thingProperties.h
+  initProperties();
+
+  // Connect to Arduino IoT Cloud
+  ArduinoCloud.begin(ArduinoIoTPreferredConnection);
+  
+  /*
+     The following function allows you to obtain more information
+     related to the state of network and IoT Cloud connection and errors
+     the higher number the more granular information you’ll get.
+     The default is 0 (only errors).
+     Maximum is 4
+ */
+  setDebugMessageLevel(2);
+  ArduinoCloud.printDebugInfo();
+}
+
+void loop() {
+  ArduinoCloud.update();
+  // Your code here
+  humidity = dht1.readHumidity();
+  temperature = dht1.readTemperature();
+  
+  humidity2 = dht2.readHumidity();
+  temperature2 = dht2.readTemperature();
+
+  powerHumidifier = ina219.getPower_mW();
+  
+  onSystemStatusChange();
+  
+}  
+
+
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+  Since HumidifierValue is READ_WRITE variable, onHumidifierValueChange() is
+  executed every time a new value is received from IoT Cloud.
+*/
+void onHumidifierValueChange()  {
+  // Add your code here to act upon HumidifierValue change
+}
+
+/*
+  Since FanValue is READ_WRITE variable, onFanValueChange() is
+  executed every time a new value is received from IoT Cloud.
+*/
+void onFanValueChange()  {
+  // Add your code here to act upon FanValue change
+}
+
+
+
+
+
+
+
+
+
+/*
+  Since Humidity2 is READ_WRITE variable, onHumidity2Change() is
+  executed every time a new value is received from IoT Cloud.
+*/
+void onHumidity2Change()  {
+  // Add your code here to act upon Humidity2 change
+}
+
+
+
+
+
+/*
+  Since SystemStatus is READ_WRITE variable, onSystemStatusChange() is
+  executed every time a new value is received from IoT Cloud.
+*/
+void onSystemStatusChange()  {
+  // Add your code here to act upon SystemStatus change
+  
+  if  (systemStatus == 0){
+    digitalWrite(relaypin, HIGH);
+    humidifierStatus = false;
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, HIGH);
+    analogWrite(ENA, 0);
+    fanStatus = false;
+
+  }
+  
+  else {
+    if ((humidity<92) || (temperature>28)) {
+      digitalWrite(relaypin, LOW);
+      humidifierStatus = true;
+    }
+  
+    else {
+      digitalWrite(relaypin, HIGH);
+      humidifierStatus = false;
+    }
+  
+    if (humidity>95) {
+      digitalWrite(IN1, LOW);
+      digitalWrite(IN2, HIGH);
+      analogWrite(ENA, 255);
+      fanStatus = true;
+    }
+  
+    else {
+      digitalWrite(IN1, LOW);
+      digitalWrite(IN2, HIGH);
+      analogWrite(ENA, 0);
+      fanStatus = false;
+    }
+
+    
+  
+}
+}
